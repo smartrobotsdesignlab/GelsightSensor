@@ -439,6 +439,9 @@ class Visualize3D:
     def depth2points(self, Z):
         self.points[:, 2] = np.ndarray.flatten(Z)
 
+    def get_depth_points(self):
+        return self.points
+
     def update(self, Z):
         self.depth2points(Z)
         dx, dy = np.gradient(Z)

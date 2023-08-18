@@ -2,8 +2,6 @@ import sys, getopt
 import cv2
 from gelsight import gsdevice
 
-import numpy as np
-
 
 def main(argv):
 
@@ -88,33 +86,6 @@ def main(argv):
             f1 = dev.get_image(roi)
             bigframe = cv2.resize(f1, (f1.shape[1]*2, f1.shape[0]*2))
             cv2.imshow('Image', bigframe)
-
-            # Blur the image to improve detection
-            image = cv2.medianBlur(bigframe,5)
-
-            # Convert the image to grayscale
-            # gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) 
-            # (we don't need this line if we load the image in grayscale mode)
-
-            # Apply the Hough Circle Transform
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 1, minDist=50,
-                                    param1=50, param2=30, minRadius=0, maxRadius=-1)
-            cv2.imshow("Circle Detected Image", gray)
-            if circles is not None:
-                # Convert the (x, y) coordinates and radius of the circles to integers
-                circles = np.round(circles[0, :]).astype("int")
-
-                # Loop over the (x, y) coordinates and radius of the circles
-                for (x, y, r) in circles:
-                    # Draw the circle in the output image
-                    cv2.circle(gray, (x, y), r, (0, 255, 0), 4)
-
-                # Show the output image
-                cv2.imshow("Circle Detected Image", gray)
-
-            else:
-                print("No circles were found.")
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break

@@ -1,9 +1,15 @@
 import sys, getopt
-import cv2
-from gelsight import gsdevice
-
 import numpy as np
+import cv2
+import os
+from gelsight import gsdevice
+from gelsight import gs3drecon
 
+def get_diff_img(img1, img2):
+    return np.clip((img1.astype(int) - img2.astype(int)), 0, 255).astype(np.uint8)
+
+def get_diff_img_2(img1, img2):
+    return (img1 * 1.0 - img2) / 255.  + 0.5
 
 def main(argv):
 
@@ -11,12 +17,12 @@ def main(argv):
     try:
        opts, args = getopt.getopt(argv, "hd:", ["device="])
     except getopt.GetoptError:
-       print('python showimages.py -d <device>')
+       print('python show3d.py -d <device>')
        sys.exit(2)
     for opt, arg in opts:
        if opt == '-h':
-          print('showimages.py -d <device>')
-          print('Use R1 for R1 device \ngsr15???.local for R1.5 device \nmini for mini device')
+          print('show3d.py -d <device>')
+          print('Use R1 for R1 device, and gsr15???.local for R2 device')
           sys.exit()
        elif opt in ("-d", "--device"):
           device = arg
@@ -24,16 +30,29 @@ def main(argv):
     # Set flags 
     SAVE_VIDEO_FLAG = False
     GPU = False
-    MASK_MARKERS_FLAG = False
-    FIND_ROI = False ## set True the first time to find ROI on an interactive window. Once values are found, use one of the else block.
+    MASK_MARKERS_FLAG = True
+    FIND_ROI = False
+
+    # Path to 3d model
+    path = '.'
+
+    # Set the camera resolution
+    # mmpp = 0.0887  # for 240x320 img size
+    # mmpp = 0.1778  # for 160x120 img size from R1
+    # mmpp = 0.0446  # for 640x480 img size R1
+    # mmpp = 0.029 # for 1032x772 img size from R1
+    mmpp = 0.075  # r2d2 gel 18x24mm at 240x320
 
     if device == "R1":
         finger = gsdevice.Finger.R1
+        mmpp = 0.0887
     elif device[-5:] == "local":
         finger = gsdevice.Finger.R15
+        mmpp = 0.0887
         capturestream = "http://" + device + ":8080/?action=stream"
     elif device == "mini":
         finger = gsdevice.Finger.MINI
+        mmpp = 0.0625
     else:
         print('Unknown device name')
         print('Use R1 for R1 device \ngsr15???.local for R1.5 device \nmini for mini device')
@@ -41,19 +60,40 @@ def main(argv):
 
     if finger == gsdevice.Finger.R1:
         dev = gsdevice.Camera(finger, 0)
+        net_file_path = 'nnr1.pt'
     elif finger == gsdevice.Finger.R15:
         #cap = cv2.VideoCapture('http://gsr15demo.local:8080/?action=stream')
         dev = gsdevice.Camera(finger, capturestream)
+        net_file_path = 'nnr15.pt'
     elif finger == gsdevice.Finger.MINI:
         # the device ID can change after unplugging and changing the usb ports.
         # on linux run, v4l2-ctl --list-devices, in the terminal to get the device ID for camera
         cam_id = gsdevice.get_camera_id("GelSight Mini")
         dev = gsdevice.Camera(finger, cam_id)
+        net_file_path = 'nnmini.pt'
 
     dev.connect()
 
+    ''' Load neural network '''
+    model_file_path = path
+    net_path = os.path.join(model_file_path, net_file_path)
+    print('net path = ', net_path)
+
+    if GPU: gpuorcpu = "cuda"
+    else: gpuorcpu = "cpu"
+    if device=="R1":
+        nn = gs3drecon.Reconstruction3D(gs3drecon.Finger.R1, dev)
+    else:
+        nn = gs3drecon.Reconstruction3D(gs3drecon.Finger.R15, dev)
+    net = nn.load_nn(net_path, gpuorcpu)
+
+    if SAVE_VIDEO_FLAG:
+        #### Below VideoWriter object will create a frame of above defined The output is stored in 'filename.avi' file.
+        file_path = './3dnnlive.mov'
+        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        out = cv2.VideoWriter(file_path, fourcc, 60, (160, 120), isColor=True)
+
     f0 = dev.get_raw_image()
-    print('image size = ', f0.shape[1], f0.shape[0])
     roi = (0, 0, f0.shape[1], f0.shape[0])
 
     if FIND_ROI:
@@ -61,7 +101,7 @@ def main(argv):
         roi_cropped = f0[int(roi[1]):int(roi[1] + roi[3]), int(roi[0]):int(roi[0] + roi[2])]
         cv2.imshow('ROI', roi_cropped)
         print('Press q in ROI image to continue')
-        cv2.waitKey(0)
+        cv2.waitKey(0) 
         cv2.destroyAllWindows()
     elif f0.shape == (640,480,3) and device != 'mini':
         roi = (60, 100, 375, 380)
@@ -74,12 +114,12 @@ def main(argv):
 
     print('roi = ', roi)
     print('press q on image to exit')
-
-    if SAVE_VIDEO_FLAG:
-        #### Below VideoWriter object will create a frame of above defined The output is stored in 'filename.avi' file.
-        file_path = './3dlive.mov'
-        fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        out = cv2.VideoWriter(file_path, fourcc, 60, (f0.shape[1], f0.shape[0]), isColor=True)
+    
+    ''' use this to plot just the 3d '''
+    if device == 'mini':
+        vis3d = gs3drecon.Visualize3D(dev.imgh, dev.imgw, '', mmpp)
+    else:
+        vis3d = gs3drecon.Visualize3D(dev.imgw, dev.imgh, '', mmpp)
 
     try:
         while dev.while_condition:
@@ -89,32 +129,11 @@ def main(argv):
             bigframe = cv2.resize(f1, (f1.shape[1]*2, f1.shape[0]*2))
             cv2.imshow('Image', bigframe)
 
-            # Blur the image to improve detection
-            image = cv2.medianBlur(bigframe,5)
+            # compute the depth map
+            dm = nn.get_depthmap(f1, MASK_MARKERS_FLAG)
 
-            # Convert the image to grayscale
-            # gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) 
-            # (we don't need this line if we load the image in grayscale mode)
-
-            # Apply the Hough Circle Transform
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 1, minDist=50,
-                                    param1=50, param2=30, minRadius=0, maxRadius=-1)
-            cv2.imshow("Circle Detected Image", gray)
-            if circles is not None:
-                # Convert the (x, y) coordinates and radius of the circles to integers
-                circles = np.round(circles[0, :]).astype("int")
-
-                # Loop over the (x, y) coordinates and radius of the circles
-                for (x, y, r) in circles:
-                    # Draw the circle in the output image
-                    cv2.circle(gray, (x, y), r, (0, 255, 0), 4)
-
-                # Show the output image
-                cv2.imshow("Circle Detected Image", gray)
-
-            else:
-                print("No circles were found.")
+            ''' Display the results '''
+            vis3d.update(dm)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break

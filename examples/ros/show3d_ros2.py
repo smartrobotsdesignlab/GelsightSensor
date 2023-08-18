@@ -24,26 +24,7 @@ class PCDPublisher(Node):
     def __init__(self):
         super().__init__('pcd_publisher_node')
 
-        device = ""
-        try:
-            opts, args = getopt.getopt(sys.argv, "hd:", ["device="])
-
-            print ('\n\n\nargs[2]:', args, '\n\n\n')
-
-        except getopt.GetoptError:
-            print('python show3d.py -d <device>')
-            sys.exit(2)
-        for opt, arg in opts:
-            if opt == '-h':
-                print('show3d.py -d <device>')
-                print('Use R1 for R1 device, and gsr15???.local for R2 device')
-                sys.exit()
-            elif opt in ("-d", "--device"):
-                device = sys.argv[1]
-
-
-        device = sys.argv[2]
-
+        device = "mini"
 
         # Set flags
         SAVE_VIDEO_FLAG = False

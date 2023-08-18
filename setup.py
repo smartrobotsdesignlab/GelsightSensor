@@ -16,7 +16,6 @@ setup(
         'Pillow>=9.5.0',
         'pygrabber>=0.1',
         'pyusb>=1.2.1',
-        'rospy>=1.15.14',
         'scikit_image>=0.18.3',
         'scipy>=1.10.1',
         'sensor_msgs>=1.13.1',
